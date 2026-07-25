@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>慢壘打擊手札</title>
+
+  <!-- iOS PWA (加入主畫面) 設定 -->
+  <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/su-family-kh/png-gallery/refs/heads/main/sotfball-logo.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="慢壘手札">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #F2F2F7;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent; /* 移除 iOS 點擊閃爍 */
+    }
+    .pb-safe { padding-bottom: env(safe-area-inset-bottom, 24px); }
+    .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+    
+    /* 隱藏原生 date picker 的 icon */
+    input[type="date"]::-webkit-calendar-picker-indicator {
+      display: none;
+      -webkit-appearance: none;
+    }
+  </style>
+
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+
+  <!-- Firebase v9/v10 Compat Libraries -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useEffect } = React;
+
+    // --- 圖示元件 (取代 Lucide-react) ---
+    const IconClipboardList = ({ className }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><path d="M12 11h4"></path><path d="M12 16h4"></path><path d="M8 11h.01"></path><path d="M8 16h.01"></path></svg>
+    );
+    const IconHistory = ({ className }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path></svg>
+    );
+    const IconBarChart = ({ className }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+    );
+    const IconPlus = ({ className }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+    );
+    const IconTrash2 = ({ className }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+    );
+    const IconPencil = ({ className }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+    );
+    const IconTrendingUp = ({ className, style }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style}><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+    );
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBWU2hkO1hxwUR0T_0Z00ALH1jYxuAxI0Q",
+      authDomain: "softball-346cd.firebaseapp.com",
+      projectId: "softball-346cd",
+      storageBucket: "softball-346cd.firebasestorage.app",
+      messagingSenderId: "370646476088",
+      appId: "1:370646476088:web:9908901dd41e3d5a958dcd",
+      measurementId: "G-SKPYW4D6FW"
+    };
+    
+    // 使用 firebase global variable (由 CDN 提供)
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    const TEAM_ID = "softball-team-shared-001";
+
+    const OUTCOMES = {
+      '1B': { label: '一安', bgColor: 'bg-green-100', textColor: 'text-green-700', borderColor: 'border-green-300', activeBg: 'bg-green-500', activeText: 'text-white' },
+      '2B': { label: '二安', bgColor: 'bg-green-100', textColor: 'text-green-700', borderColor: 'border-green-300', activeBg: 'bg-green-500', activeText: 'text-white' },
+      '3B': { label: '三安', bgColor: 'bg-green-100', textColor: 'text-green-700', borderColor: 'border-green-300', activeBg: 'bg-green-500', activeText: 'text-white' },
+      'HR': { label: '全壘打', bgColor: 'bg-green-100', textColor: 'text-green-700', borderColor: 'border-green-300', activeBg: 'bg-green-600', activeText: 'text-white' },
+      'GO': { label: '滾地出局', bgColor: 'bg-red-100', textColor: 'text-red-700', borderColor: 'border-red-300', activeBg: 'bg-red-500', activeText: 'text-white' },
+      'FO': { label: '飛球出局', bgColor: 'bg-red-100', textColor: 'text-red-700', borderColor: 'border-red-300', activeBg: 'bg-red-500', activeText: 'text-white' },
+      'LO': { label: '平飛出局', bgColor: 'bg-red-100', textColor: 'text-red-700', borderColor: 'border-red-300', activeBg: 'bg-red-500', activeText: 'text-white' },
+      'K':  { label: '三振', bgColor: 'bg-red-100', textColor: 'text-red-700', borderColor: 'border-red-300', activeBg: 'bg-red-600', activeText: 'text-white' },
+      'FC': { label: '野手選擇', bgColor: 'bg-orange-100', textColor: 'text-orange-700', borderColor: 'border-orange-300', activeBg: 'bg-orange-500', activeText: 'text-white' },
+      'BB': { label: '四壞保送', bgColor: 'bg-blue-100', textColor: 'text-blue-700', borderColor: 'border-blue-300', activeBg: 'bg-blue-500', activeText: 'text-white' },
+      'SF': { label: '犧牲打', bgColor: 'bg-yellow-100', textColor: 'text-yellow-700', borderColor: 'border-yellow-400', activeBg: 'bg-yellow-500', activeText: 'text-white' },
+      'E':  { label: '失誤上壘', bgColor: 'bg-gray-100', textColor: 'text-gray-700', borderColor: 'border-gray-300', activeBg: 'bg-gray-500', activeText: 'text-white' },
+    };
+
+    function App() {
+      const [activeTab, setActiveTab] = useState('record'); 
+      const [records, setRecords] = useState([]);
+      const [user, setUser] = useState(null);
+      const [isSaving, setIsSaving] = useState(false);
+
+      useEffect(() => {
+        const initAuth = async () => {
+          try {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+              auth.signInWithCustomToken(__initial_auth_token).catch(() => auth.signInAnonymously());
+            } else {
+              auth.signInAnonymously();
+            }
+          } catch (error) {
+            console.error("Auth error:", error);
+          }
+        };
+        initAuth();
+        const unsubscribe = auth.onAuthStateChanged(setUser);
+        return () => unsubscribe();
+      }, []);
+
+      useEffect(() => {
+        if (!user) return;
+        const recordsRef = db.collection('artifacts').doc(TEAM_ID).collection('public').doc('data').collection('records');
+        const unsubscribe = recordsRef.onSnapshot((snapshot) => {
+          const loadedRecords = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          loadedRecords.sort((a, b) => b.timestamp - a.timestamp);
+          setRecords(loadedRecords);
+        }, (error) => {
+          console.error("Firestore error:", error);
+        });
+        return () => unsubscribe();
+      }, [user]);
+
+      const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
+      const [selectedTeam, setSelectedTeam] = useState('幸福家');
+      const [customTeam, setCustomTeam] = useState('');
+      const [selectedOutcome, setSelectedOutcome] = useState(null);
+      const [rbi, setRbi] = useState(0);
+
+      const [isEditing, setIsEditing] = useState(false);
+      const [editingId, setEditingId] = useState(null);
+      const [statsView, setStatsView] = useState('team');
+
+      const stats = useMemo(() => {
+        const teamStats = {};
+        records.forEach(r => {
+          const teamName = r.team || '未分類';
+          if (!teamStats[teamName]) {
+            teamStats[teamName] = { PA: 0, AB: 0, H: 0, '1B': 0, '2B': 0, '3B': 0, HR: 0, BB: 0, SF: 0, K: 0, RBI: 0 };
+          }
+          const p = teamStats[teamName];
+          p.PA += 1;
+          p.RBI += r.rbi;
+
+          if (r.outcome === '1B') { p['1B']++; p.H++; p.AB++; }
+          else if (r.outcome === '2B') { p['2B']++; p.H++; p.AB++; }
+          else if (r.outcome === '3B') { p['3B']++; p.H++; p.AB++; }
+          else if (r.outcome === 'HR') { p.HR++; p.H++; p.AB++; }
+          else if (['GO', 'FO', 'LO', 'K', 'E', 'FC'].includes(r.outcome)) { p.AB++; }
+
+          if (r.outcome === 'K') p.K++;
+          if (r.outcome === 'BB') p.BB++;
+          if (r.outcome === 'SF') p.SF++;
+        });
+
+        return Object.entries(teamStats).map(([name, s]) => {
+          const avg = s.AB > 0 ? (s.H / s.AB) : 0;
+          const obp = s.PA > 0 ? ((s.H + s.BB) / (s.AB + s.BB + s.SF)) : 0;
+          const slg = s.AB > 0 ? ((s['1B'] + 2 * s['2B'] + 3 * s['3B'] + 4 * s.HR) / s.AB) : 0;
+          const ops = obp + slg;
+
+          return {
+            name,
+            ...s,
+            AVG: avg.toFixed(3).replace(/^0+/, ''),
+            OBP: obp.toFixed(3).replace(/^0+/, ''),
+            SLG: slg.toFixed(3).replace(/^0+/, ''),
+            OPS: ops.toFixed(3).replace(/^0+/, '')
+          };
+        }).sort((a, b) => parseFloat(b.OPS || 0) - parseFloat(a.OPS || 0));
+      }, [records]);
+
+      const monthlyStats = useMemo(() => {
+        const mStats = {};
+        records.forEach(r => {
+          if (!r.date) return;
+          const month = r.date.substring(0, 7);
+          if (!mStats[month]) {
+            mStats[month] = { PA: 0, AB: 0, H: 0, '1B': 0, '2B': 0, '3B': 0, HR: 0, BB: 0, SF: 0, K: 0, RBI: 0 };
+          }
+          const p = mStats[month];
+          p.PA += 1;
+          p.RBI += r.rbi || 0;
+
+          if (r.outcome === '1B') { p['1B']++; p.H++; p.AB++; }
+          else if (r.outcome === '2B') { p['2B']++; p.H++; p.AB++; }
+          else if (r.outcome === '3B') { p['3B']++; p.H++; p.AB++; }
+          else if (r.outcome === 'HR') { p.HR++; p.H++; p.AB++; }
+          else if (['GO', 'FO', 'LO', 'K', 'E', 'FC'].includes(r.outcome)) { p.AB++; }
+
+          if (r.outcome === 'K') p.K++;
+          if (r.outcome === 'BB') p.BB++;
+          if (r.outcome === 'SF') p.SF++;
+        });
+
+        return Object.entries(mStats).map(([month, s]) => {
+          const avg = s.AB > 0 ? (s.H / s.AB) : 0;
+          const obp = s.PA > 0 ? ((s.H + s.BB) / (s.AB + s.BB + s.SF)) : 0;
+          const slg = s.AB > 0 ? ((s['1B'] + 2 * s['2B'] + 3 * s['3B'] + 4 * s.HR) / s.AB) : 0;
+          const ops = obp + slg;
+
+          return {
+            month,
+            ...s,
+            AVG: avg.toFixed(3).replace(/^0+/, ''),
+            OBP: obp.toFixed(3).replace(/^0+/, ''),
+            SLG: slg.toFixed(3).replace(/^0+/, ''),
+            OPS: ops.toFixed(3).replace(/^0+/, '')
+          };
+        }).sort((a, b) => a.month.localeCompare(b.month));
+      }, [records]);
+
+      const renderLineChart = (data, dataKey, title, color) => {
+        if (data.length < 2) return null;
+        const values = data.map(d => parseFloat(d[dataKey]) || 0);
+        const maxVal = Math.max(...values) + 0.05;
+        const minVal = Math.max(0, Math.min(...values) - 0.05);
+        const range = maxVal - minVal || 1;
+
+        const width = 300;
+        const height = 120;
+        const paddingX = 30;
+        const paddingY = 25;
+
+        const points = data.map((d, i) => {
+          const x = paddingX + (i / (data.length - 1)) * (width - 2 * paddingX);
+          const y = height - paddingY - ((parseFloat(d[dataKey]) || 0) - minVal) / range * (height - 2 * paddingY);
+          return `${x},${y}`;
+        }).join(' ');
+
+        return (
+          <div className="bg-white p-4 rounded-[1.25rem] mt-4">
+            <h3 className="font-semibold text-black mb-4 text-[15px] flex items-center gap-2">
+              <IconTrendingUp className="w-4 h-4" style={{ color }} /> {title}
+            </h3>
+            <div className="w-full overflow-visible">
+               <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto overflow-visible">
+                <line x1={paddingX} y1={paddingY} x2={width-paddingX} y2={paddingY} stroke="#E5E5EA" />
+                <line x1={paddingX} y1={height-paddingY} x2={width-paddingX} y2={height-paddingY} stroke="#E5E5EA" />
+                <text x="0" y={paddingY + 3} fontSize="10" fill="#8E8E93">{maxVal.toFixed(3).replace(/^0+/, '')}</text>
+                <text x="0" y={height - paddingY + 3} fontSize="10" fill="#8E8E93">{minVal.toFixed(3).replace(/^0+/, '')}</text>
+                <polyline points={points} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                {data.map((d, i) => {
+                  const val = parseFloat(d[dataKey]) || 0;
+                  const x = paddingX + (i / (data.length - 1)) * (width - 2 * paddingX);
+                  const y = height - paddingY - (val - minVal) / range * (height - 2 * paddingY);
+                  return (
+                    <g key={i}>
+                      <circle cx={x} cy={y} r="4" fill="white" stroke={color} strokeWidth="2" />
+                      <text x={x} y={height + 5} fontSize="10" fill="#8E8E93" textAnchor="middle">{d.month.substring(5)}</text>
+                      <text x={x} y={y - 10} fontSize="10" fill={color} textAnchor="middle" fontWeight="600">{d[dataKey]}</text>
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+          </div>
+        );
+      };
+
+      const handleEditClick = (record) => {
+        setIsEditing(true);
+        setEditingId(record.id);
+        setSelectedDate(record.date);
+        if (['幸福家', '蔡淑惠'].includes(record.team)) {
+          setSelectedTeam(record.team);
+          setCustomTeam('');
+        } else {
+          setSelectedTeam('自訂');
+          setCustomTeam(record.team);
+        }
+        setSelectedOutcome(record.outcome);
+        setRbi(record.rbi || 0);
+        setActiveTab('record');
+      };
+
+      const handleCancelEdit = () => {
+        setIsEditing(false);
+        setEditingId(null);
+        setSelectedOutcome(null);
+        setRbi(0);
+        setActiveTab('history');
+      };
+
+      const handleSaveRecord = async () => {
+        const finalTeam = selectedTeam === '自訂' ? customTeam.trim() : selectedTeam;
+        if (!finalTeam || !selectedOutcome || !selectedDate || !user) return;
+        setIsSaving(true);
+        
+        try {
+          const recordsRef = db.collection('artifacts').doc(TEAM_ID).collection('public').doc('data').collection('records');
+          if (isEditing && editingId) {
+            await recordsRef.doc(editingId).update({
+              date: selectedDate,
+              team: finalTeam,
+              outcome: selectedOutcome,
+              rbi: rbi
+            });
+            setIsEditing(false);
+            setEditingId(null);
+            setSelectedOutcome(null);
+            setRbi(0);
+            setActiveTab('history'); 
+          } else {
+            const newRecord = {
+              date: selectedDate,
+              team: finalTeam,
+              outcome: selectedOutcome,
+              rbi: rbi,
+              timestamp: Date.now()
+            };
+            await recordsRef.add(newRecord); 
+            setSelectedOutcome(null);
+            setRbi(0);
+          }
+        } catch (error) {
+          console.error("儲存失敗:", error);
+        } finally {
+          setIsSaving(false);
+        }
+      };
+
+      const handleDeleteRecord = async (id) => {
+        if (!user) return;
+        try {
+          await db.collection('artifacts').doc(TEAM_ID).collection('public').doc('data').collection('records').doc(id).delete();
+        } catch (error) {
+          console.error("刪除失敗:", error);
+        }
+      };
+
+      return (
+        <div className="flex flex-col h-screen max-w-md mx-auto overflow-hidden relative">
+          
+          <header className="bg-white/80 backdrop-blur-md text-black pt-safe pb-3 px-4 border-b border-[#E5E5EA] z-10 flex items-end justify-center relative h-[60px] shrink-0">
+            <h1 className="text-[17px] font-semibold leading-tight">慢壘打擊手札</h1>
+          </header>
+
+          <main className="flex-1 overflow-y-auto pb-24 px-4 pt-4">
+            
+            {activeTab === 'record' && (
+              <div className="space-y-5 animate-in fade-in duration-300">
+                <div className="bg-white rounded-[1.25rem] overflow-hidden">
+                  <div className="flex items-center justify-between p-4 border-b border-[#E5E5EA]">
+                    <span className="text-[17px] text-black">日期</span>
+                    <input 
+                      type="date" 
+                      value={selectedDate}
+                      onChange={(e) => setSelectedDate(e.target.value)}
+                      className="text-[17px] text-[#007AFF] bg-transparent outline-none text-right appearance-none"
+                    />
+                  </div>
+                  <div className="p-4">
+                    <span className="text-[17px] text-black block mb-3">球隊</span>
+                    <div className="flex bg-[#E5E5EA] p-1 rounded-[8px] mb-2">
+                      {['幸福家', '蔡淑惠', '自訂'].map(team => (
+                        <button
+                          key={team}
+                          onClick={() => setSelectedTeam(team)}
+                          className={`flex-1 py-1.5 rounded-[6px] text-[13px] font-medium transition-all ${
+                            selectedTeam === team 
+                              ? 'bg-white text-black shadow-sm' 
+                              : 'text-black/60'
+                          }`}
+                        >
+                          {team}
+                        </button>
+                      ))}
+                    </div>
+                    {selectedTeam === '自訂' && (
+                      <input 
+                        type="text" 
+                        value={customTeam}
+                        onChange={(e) => setCustomTeam(e.target.value)}
+                        placeholder="輸入自訂球隊"
+                        className="w-full mt-1 p-2 border-b border-[#E5E5EA] outline-none text-[17px] bg-transparent"
+                      />
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <h2 className="text-[13px] text-[#8E8E93] uppercase pl-4 mb-2">打擊結果</h2>
+                  <div className="bg-white p-4 rounded-[1.25rem]">
+                    <div className="grid grid-cols-4 gap-3">
+                      {Object.entries(OUTCOMES).map(([key, data]) => {
+                        const isSelected = selectedOutcome === key;
+                        return (
+                          <button
+                            key={key}
+                            onClick={() => setSelectedOutcome(key)}
+                            className={`
+                              py-3 px-1 rounded-[12px] border-2 transition-all duration-200
+                              ${isSelected 
+                                ? `${data.activeBg} ${data.activeText} border-transparent shadow-md transform scale-105` 
+                                : `${data.bgColor} ${data.textColor} ${data.borderColor} active:scale-95`
+                              }
+                            `}
+                          >
+                            <div className="text-[17px] font-semibold mb-0.5">{key}</div>
+                            <div className="text-[10px] opacity-90">{data.label}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <h2 className="text-[13px] text-[#8E8E93] uppercase pl-4 mb-2">打點 (RBI)</h2>
+                  <div className="bg-white rounded-[1.25rem] p-1.5 flex justify-between">
+                    {[0, 1, 2, 3, 4].map(num => (
+                      <button
+                        key={num}
+                        onClick={() => setRbi(num)}
+                        className={`flex-1 py-2.5 text-[17px] font-medium rounded-[10px] transition-colors ${
+                          rbi === num 
+                            ? 'bg-[#007AFF] text-white' 
+                            : 'text-black hover:bg-[#F2F2F7]'
+                        }`}
+                      >
+                        {num}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-2 space-y-3">
+                  <button 
+                    onClick={handleSaveRecord}
+                    disabled={!(selectedTeam === '自訂' ? customTeam.trim() : selectedTeam) || !selectedOutcome || !selectedDate || isSaving || !user}
+                    className={`w-full py-3.5 rounded-[14px] text-[17px] font-semibold flex items-center justify-center gap-2 transition-all
+                      ${(!(selectedTeam === '自訂' ? customTeam.trim() : selectedTeam) || !selectedOutcome || !selectedDate || isSaving || !user) 
+                        ? 'bg-[#E5E5EA] text-[#8E8E93] cursor-not-allowed' 
+                        : 'bg-[#007AFF] text-white active:bg-[#005bb5]'
+                      }
+                    `}
+                  >
+                    {isEditing ? null : <IconPlus className="w-5 h-5" />} 
+                    {isSaving ? '處理中...' : (isEditing ? '更新記錄' : '儲存記錄')}
+                  </button>
+                  
+                  {isEditing && (
+                    <button
+                      onClick={handleCancelEdit}
+                      disabled={isSaving}
+                      className="w-full py-3.5 rounded-[14px] text-[17px] font-semibold bg-white text-[#FF3B30] border border-[#FF3B30] active:bg-[#F2F2F7] transition-all"
+                    >
+                      取消修改
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {}
+            {activeTab === 'history' && (
+              <div className="animate-in fade-in duration-300">
+                <h2 className="text-[28px] font-bold text-black mb-4 pl-2">歷史記錄</h2>
+                
+                {records.length === 0 ? (
+                  <div className="text-center py-16 text-[#8E8E93]">
+                    <p>尚無任何打擊記錄</p>
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-[1.25rem] overflow-hidden">
+                    {records.map((record, index) => {
+                      const outcomeData = OUTCOMES[record.outcome];
+                      const timeStr = new Date(record.timestamp).toLocaleTimeString('zh-TW', { hour: '2-digit', minute:'2-digit' });
+                      
+                      return (
+                        <div key={record.id} className={`p-4 flex items-center justify-between ${index !== records.length - 1 ? 'border-b border-[#E5E5EA]' : ''}`}>
+                          <div className="flex items-center gap-4">
+                            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${outcomeData.activeBg} text-white font-semibold text-[17px]`}>
+                              {record.outcome}
+                            </div>
+                            <div>
+                              <div className="font-semibold text-[17px] text-black leading-tight mb-1">{record.team}</div>
+                              <div className="text-[13px] text-[#8E8E93] flex items-center gap-1.5">
+                                <span>{record.date}</span>
+                                <span>{timeStr}</span>
+                                <span>{outcomeData.label}</span>
+                                {record.rbi > 0 && (
+                                  <span className="text-[#007AFF] font-medium">• {record.rbi} 打點</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center">
+                            <button 
+                              onClick={() => handleEditClick(record)}
+                              className="p-2 text-[#C7C7CC] active:text-[#007AFF] transition-colors"
+                            >
+                              <IconPencil className="w-5 h-5" />
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteRecord(record.id)}
+                              className="p-2 text-[#C7C7CC] active:text-[#FF3B30] transition-colors"
+                            >
+                              <IconTrash2 className="w-5 h-5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {}
+            {activeTab === 'stats' && (
+              <div className="animate-in fade-in duration-300">
+                <h2 className="text-[28px] font-bold text-black mb-4 pl-2">數據統計</h2>
+
+                <div className="flex bg-[#E5E5EA] p-1 rounded-[8px] mb-6">
+                  <button 
+                    onClick={() => setStatsView('team')}
+                    className={`flex-1 py-1.5 rounded-[6px] text-[13px] font-medium transition-all ${statsView === 'team' ? 'bg-white text-black shadow-sm' : 'text-black/60'}`}
+                  >
+                    依球隊
+                  </button>
+                  <button 
+                    onClick={() => setStatsView('month')}
+                    className={`flex-1 py-1.5 rounded-[6px] text-[13px] font-medium transition-all ${statsView === 'month' ? 'bg-white text-black shadow-sm' : 'text-black/60'}`}
+                  >
+                    依月份與趨勢
+                  </button>
+                </div>
+
+                {(statsView === 'team' ? stats.length : monthlyStats.length) === 0 ? (
+                  <div className="text-center py-16 text-[#8E8E93]">
+                    <p>尚無數據可供統計</p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    <div className="bg-white rounded-[1.25rem] overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-[15px] text-left">
+                          <thead className="bg-[#F9F9F9] text-[#8E8E93] font-medium border-b border-[#E5E5EA]">
+                            <tr>
+                              <th className="px-4 py-3 sticky left-0 bg-[#F9F9F9] z-10 font-medium">
+                                {statsView === 'team' ? '球隊' : '月份'}
+                              </th>
+                              <th className="px-3 py-3 font-normal">PA</th>
+                              <th className="px-3 py-3 font-normal">AB</th>
+                              <th className="px-3 py-3 font-normal">H</th>
+                              <th className="px-3 py-3 font-normal">HR</th>
+                              <th className="px-3 py-3 font-normal text-[#007AFF]">AVG</th>
+                              <th className="px-3 py-3 font-normal text-[#34C759]">OBP</th>
+                              <th className="px-3 py-3 font-normal text-[#AF52DE]">OPS</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[#E5E5EA]">
+                            {(statsView === 'team' ? stats : monthlyStats).map((s, idx) => (
+                              <tr key={s.name || s.month} className="bg-white">
+                                <td className="px-4 py-3 sticky left-0 bg-white font-semibold text-black z-10 whitespace-nowrap">
+                                  {statsView === 'team' ? s.name : s.month}
+                                </td>
+                                <td className="px-3 py-3 text-black">{s.PA}</td>
+                                <td className="px-3 py-3 text-black">{s.AB}</td>
+                                <td className="px-3 py-3 text-black">{s.H}</td>
+                                <td className="px-3 py-3 text-black">{s.HR}</td>
+                                <td className="px-3 py-3 font-semibold text-[#007AFF]">{s.AVG}</td>
+                                <td className="px-3 py-3 font-semibold text-[#34C759]">{s.OBP}</td>
+                                <td className="px-3 py-3 font-semibold text-[#AF52DE]">{s.OPS}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {statsView === 'month' && (
+                      <div>
+                        {monthlyStats.length < 2 ? (
+                      <p className="text-center text-[13px] text-[#8E8E93] py-4">
+                        * 累積兩個月以上的資料解鎖趨勢圖
+                      </p>
+                    ) : (
+                      <div className="space-y-4">
+                        {renderLineChart(monthlyStats, 'AVG', '打擊率 (AVG)', '#007AFF')}
+                        {renderLineChart(monthlyStats, 'OPS', '攻擊指數 (OPS)', '#AF52DE')}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            </div>
+          )}
+        </main>
+
+        {}
+        <nav className="bg-white/80 backdrop-blur-md border-t border-[#E5E5EA] flex justify-around items-center pb-safe absolute bottom-0 w-full max-w-md h-[83px]">
+            <button 
+              onClick={() => setActiveTab('record')}
+              className={`flex-1 flex flex-col items-center justify-center gap-1 transition-colors mt-2 mb-auto ${activeTab === 'record' ? 'text-[#007AFF]' : 'text-[#8E8E93]'}`}
+            >
+              <IconClipboardList className={`w-[26px] h-[26px] ${activeTab === 'record' ? 'stroke-[2.5px]' : 'stroke-[2px]'}`} />
+              <span className="text-[10px] font-medium">記錄</span>
+            </button>
+            
+            <button 
+              onClick={() => setActiveTab('history')}
+              className={`flex-1 flex flex-col items-center justify-center gap-1 transition-colors mt-2 mb-auto ${activeTab === 'history' ? 'text-[#007AFF]' : 'text-[#8E8E93]'}`}
+            >
+              <IconHistory className={`w-[26px] h-[26px] ${activeTab === 'history' ? 'stroke-[2.5px]' : 'stroke-[2px]'}`} />
+              <span className="text-[10px] font-medium">歷史</span>
+            </button>
+            
+            <button 
+              onClick={() => setActiveTab('stats')}
+              className={`flex-1 flex flex-col items-center justify-center gap-1 transition-colors mt-2 mb-auto ${activeTab === 'stats' ? 'text-[#007AFF]' : 'text-[#8E8E93]'}`}
+            >
+              <IconBarChart className={`w-[26px] h-[26px] ${activeTab === 'stats' ? 'stroke-[2.5px]' : 'stroke-[2px]'}`} />
+              <span className="text-[10px] font-medium">數據</span>
+            </button>
+          </nav>
+
+        </div>
+      );
+    }
+
+    // 將 React 元件渲染到 DOM 中
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
