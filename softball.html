@@ -114,7 +114,7 @@
       const [editingId, setEditingId] = useState(null);
 
       // 數據檢視與下鑽狀態
-      const [statsView, setStatsView] = useState('team');
+      const [statsView, setStatsView] = useState('team'); // 'team', 'month', 'year'
       
       // 球隊視圖的下鑽狀態
       const [statDrillTeam, setStatDrillTeam] = useState(null);
@@ -123,18 +123,23 @@
       // 月份視圖的下鑽狀態
       const [statDrillOverallMonth, setStatDrillOverallMonth] = useState(null);
 
+      // 年份視圖的下鑽狀態
+      const [statDrillYear, setStatDrillYear] = useState(null);
+      const [statDrillYearMonth, setStatDrillYearMonth] = useState(null);
+
       // 切換視圖時重置所有下鑽狀態
       const handleViewChange = (view) => {
         setStatsView(view);
         setStatDrillTeam(null);
         setStatDrillMonth(null);
         setStatDrillOverallMonth(null);
+        setStatDrillYear(null);
+        setStatDrillYearMonth(null);
       };
 
-      // 處理球隊名稱換行且去除括號的 Helper Function
+      // 處理球隊名稱換行且隱藏括號的 Helper Function
       const formatName = (name) => {
         if (!name) return name;
-        // 偵測左括號與右括號 (半形或全形)，將括號內文字切出來，並不顯示括號本身
         const match = name.match(/^(.*?)[(（](.*?)[)）]?$/);
         if (match && match[1].trim() !== '') {
           return (
@@ -189,7 +194,7 @@
         });
       };
 
-      // 依球隊分析的各層級數據
+      // --- 依球隊分析的各層級數據 ---
       const teamStats = useMemo(() => 
         calculateStats(records, r => r.team || '未分類').sort((a, b) => parseFloat(b.OPS || 0) - parseFloat(a.OPS || 0)), 
       [records]);
@@ -202,7 +207,7 @@
         calculateStats(records.filter(r => r.team === statDrillTeam && r.date && r.date.startsWith(statDrillMonth)), r => r.date).sort((a, b) => a.name.localeCompare(b.name)), 
       [records, statDrillTeam, statDrillMonth]);
 
-      // 依月份與趨勢分析的各層級數據
+      // --- 依月份分析的各層級數據 ---
       const overallMonthlyStats = useMemo(() => 
         calculateStats(records, r => r.date ? r.date.substring(0, 7) : null).sort((a, b) => a.name.localeCompare(b.name)), 
       [records]);
@@ -210,6 +215,20 @@
       const monthTeamStats = useMemo(() => 
         calculateStats(records.filter(r => r.date && r.date.startsWith(statDrillOverallMonth)), r => r.team || '未分類').sort((a, b) => parseFloat(b.OPS || 0) - parseFloat(a.OPS || 0)), 
       [records, statDrillOverallMonth]);
+
+      // --- 依年份分析的各層級數據 ---
+      const overallYearlyStats = useMemo(() => 
+        calculateStats(records, r => r.date ? r.date.substring(0, 4) : null).sort((a, b) => a.name.localeCompare(b.name)), 
+      [records]);
+
+      const yearMonthlyStats = useMemo(() => 
+        calculateStats(records.filter(r => r.date && r.date.startsWith(statDrillYear)), r => r.date ? r.date.substring(0, 7) : null).sort((a, b) => a.name.localeCompare(b.name)), 
+      [records, statDrillYear]);
+
+      const yearMonthTeamStats = useMemo(() => 
+        calculateStats(records.filter(r => r.date && r.date.startsWith(statDrillYearMonth)), r => r.team || '未分類').sort((a, b) => parseFloat(b.OPS || 0) - parseFloat(a.OPS || 0)), 
+      [records, statDrillYearMonth]);
+
 
       // SVG 折線圖元件
       const renderLineChart = (data, dataKey, title, color) => {
@@ -242,7 +261,11 @@
                   const val = parseFloat(d[dataKey]) || 0;
                   const x = paddingX + (i / (data.length - 1)) * (width - 2 * paddingX);
                   const y = height - paddingY - (val - minVal) / range * (height - 2 * paddingY);
-                  const label = d.name.length > 7 ? d.name.substring(5) : d.name.substring(5);
+                  // 標籤顯示邏輯：如果是 YYYY-MM 取後兩碼，如果是長日期取後五碼，如果是年份直接顯示
+                  let label = d.name;
+                  if (d.name.length === 10) label = d.name.substring(5);
+                  else if (d.name.length === 7) label = d.name.substring(5);
+
                   return (
                     <g key={i}>
                       <circle cx={x} cy={y} r="3.5" fill="white" stroke={color} strokeWidth="2" />
@@ -369,7 +392,6 @@
                           <div className="flex items-center gap-4">
                             <div className={`w-12 h-12 rounded-full flex items-center justify-center ${outcomeData.activeBg} text-white font-semibold text-[17px]`}>{record.outcome}</div>
                             <div>
-                              {/* 歷史紀錄中套用去除括號的排版 */}
                               <div className="font-semibold text-[16px] text-black leading-tight mb-1">{formatName(record.team)}</div>
                               <div className="text-[13px] text-[#8E8E93] flex items-center gap-1.5 mt-1">
                                 <span>{record.date}</span><span>{timeStr}</span><span>{outcomeData.label}</span>
@@ -394,12 +416,14 @@
               <div className="animate-in fade-in duration-300">
                 <h2 className="text-[28px] font-bold text-black mb-4 pl-2">數據統計</h2>
 
+                {/* 切換三個模式：球隊、月份、年份 */}
                 <div className="flex bg-[#E5E5EA] p-1 rounded-[8px] mb-4">
-                  <button onClick={() => handleViewChange('team')} className={`flex-1 py-1.5 rounded-[6px] text-[13px] font-medium transition-all ${statsView === 'team' ? 'bg-white text-black shadow-sm' : 'text-black/60'}`}>依球隊分析</button>
-                  <button onClick={() => handleViewChange('month')} className={`flex-1 py-1.5 rounded-[6px] text-[13px] font-medium transition-all ${statsView === 'month' ? 'bg-white text-black shadow-sm' : 'text-black/60'}`}>整體趨勢</button>
+                  <button onClick={() => handleViewChange('team')} className={`flex-1 py-1.5 rounded-[6px] text-[13px] font-medium transition-all ${statsView === 'team' ? 'bg-white text-black shadow-sm' : 'text-black/60'}`}>依球隊</button>
+                  <button onClick={() => handleViewChange('month')} className={`flex-1 py-1.5 rounded-[6px] text-[13px] font-medium transition-all ${statsView === 'month' ? 'bg-white text-black shadow-sm' : 'text-black/60'}`}>依月份</button>
+                  <button onClick={() => handleViewChange('year')} className={`flex-1 py-1.5 rounded-[6px] text-[13px] font-medium transition-all ${statsView === 'year' ? 'bg-white text-black shadow-sm' : 'text-black/60'}`}>依年份</button>
                 </div>
 
-                {/* 麵包屑導航列 (Drill-down Breadcrumbs) - 依球隊 */}
+                {/* 麵包屑導航列 - 依球隊 */}
                 {statsView === 'team' && (
                   <div className="flex items-center gap-2 mb-4 px-2 overflow-x-auto whitespace-nowrap">
                     <button onClick={() => { setStatDrillTeam(null); setStatDrillMonth(null); }} className={`text-[15px] transition-opacity ${!statDrillTeam ? 'font-bold text-black' : 'text-[#007AFF] active:opacity-60'}`}>
@@ -422,7 +446,7 @@
                   </div>
                 )}
 
-                {/* 麵包屑導航列 (Drill-down Breadcrumbs) - 依月份 */}
+                {/* 麵包屑導航列 - 依月份 */}
                 {statsView === 'month' && (
                   <div className="flex items-center gap-2 mb-4 px-2 overflow-x-auto whitespace-nowrap">
                     <button onClick={() => setStatDrillOverallMonth(null)} className={`text-[15px] transition-opacity ${!statDrillOverallMonth ? 'font-bold text-black' : 'text-[#007AFF] active:opacity-60'}`}>
@@ -437,6 +461,29 @@
                   </div>
                 )}
 
+                {/* 麵包屑導航列 - 依年份 */}
+                {statsView === 'year' && (
+                  <div className="flex items-center gap-2 mb-4 px-2 overflow-x-auto whitespace-nowrap">
+                    <button onClick={() => { setStatDrillYear(null); setStatDrillYearMonth(null); }} className={`text-[15px] transition-opacity ${!statDrillYear ? 'font-bold text-black' : 'text-[#007AFF] active:opacity-60'}`}>
+                      所有年份
+                    </button>
+                    {statDrillYear && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[#8E8E93] text-[13px] font-bold">/</span>
+                        <button onClick={() => setStatDrillYearMonth(null)} className={`text-[15px] transition-opacity ${!statDrillYearMonth ? 'font-bold text-black' : 'text-[#007AFF] active:opacity-60'}`}>
+                          {statDrillYear}
+                        </button>
+                      </div>
+                    )}
+                    {statDrillYearMonth && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[#8E8E93] text-[13px] font-bold">/</span>
+                        <span className="text-[15px] font-bold text-black">{statDrillYearMonth}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {(() => {
                   let currentData = [];
                   let firstColTitle = '';
@@ -445,30 +492,25 @@
 
                   if (statsView === 'month') {
                     if (!statDrillOverallMonth) {
-                      currentData = overallMonthlyStats; 
-                      firstColTitle = '月份'; 
-                      canDrillDown = true;
-                      onClickRow = (s) => setStatDrillOverallMonth(s.name);
+                      currentData = overallMonthlyStats; firstColTitle = '月份'; canDrillDown = true; onClickRow = (s) => setStatDrillOverallMonth(s.name);
                     } else {
-                      currentData = monthTeamStats; 
-                      firstColTitle = '球隊'; 
-                      canDrillDown = false;
+                      currentData = monthTeamStats; firstColTitle = '球隊'; canDrillDown = false;
+                    }
+                  } else if (statsView === 'year') {
+                    if (!statDrillYear) {
+                      currentData = overallYearlyStats; firstColTitle = '年份'; canDrillDown = true; onClickRow = (s) => setStatDrillYear(s.name);
+                    } else if (!statDrillYearMonth) {
+                      currentData = yearMonthlyStats; firstColTitle = '月份'; canDrillDown = true; onClickRow = (s) => setStatDrillYearMonth(s.name);
+                    } else {
+                      currentData = yearMonthTeamStats; firstColTitle = '球隊'; canDrillDown = false;
                     }
                   } else {
                     if (!statDrillTeam) {
-                      currentData = teamStats; 
-                      firstColTitle = '球隊'; 
-                      canDrillDown = true;
-                      onClickRow = (s) => setStatDrillTeam(s.name);
+                      currentData = teamStats; firstColTitle = '球隊'; canDrillDown = true; onClickRow = (s) => setStatDrillTeam(s.name);
                     } else if (!statDrillMonth) {
-                      currentData = teamMonthlyStats; 
-                      firstColTitle = '月份'; 
-                      canDrillDown = true;
-                      onClickRow = (s) => setStatDrillMonth(s.name);
+                      currentData = teamMonthlyStats; firstColTitle = '月份'; canDrillDown = true; onClickRow = (s) => setStatDrillMonth(s.name);
                     } else {
-                      currentData = teamDailyStats; 
-                      firstColTitle = '日期'; 
-                      canDrillDown = false;
+                      currentData = teamDailyStats; firstColTitle = '日期'; canDrillDown = false;
                     }
                   }
 
@@ -519,8 +561,10 @@
                         </div>
                       </div>
 
-                      {/* 渲染折線圖區塊 */}
-                      {((statsView === 'month' && !statDrillOverallMonth) || (statsView === 'team' && statDrillTeam && !statDrillMonth)) && (
+                      {/* 渲染折線圖區塊: 年份趨勢, 月份趨勢, 及特定球隊趨勢 */}
+                      {((statsView === 'year' && !statDrillYearMonth) || 
+                        (statsView === 'month' && !statDrillOverallMonth) || 
+                        (statsView === 'team' && statDrillTeam && !statDrillMonth)) && (
                         <div>
                           {currentData.length < 2 ? (
                             <p className="text-center text-[13px] text-[#8E8E93] py-4">* 累積兩筆以上的資料即可解鎖趨勢圖</p>
