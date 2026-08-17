@@ -229,6 +229,100 @@
         calculateStats(records.filter(r => r.date && r.date.startsWith(statDrillYearMonth)), r => r.team || '未分類').sort((a, b) => parseFloat(b.OPS || 0) - parseFloat(a.OPS || 0)), 
       [records, statDrillYearMonth]);
 
+      // SVG 分組長條圖元件 (用於球隊比較)
+      const renderGroupedBarChart = (data) => {
+        if (data.length === 0) return null;
+
+        // X 軸的群組改為數據指標
+        const metrics = [
+          { key: 'AVG', label: 'AVG' },
+          { key: 'OBP', label: 'OBP' },
+          { key: 'OPS', label: 'OPS' }
+        ];
+
+        // 球隊的專屬配色 (iOS 風格色系)
+        const palette = ['#007AFF', '#34C759', '#FF9500', '#AF52DE', '#FF3B30', '#5AC8FA', '#5856D6', '#FF2D55'];
+
+        let maxVal = 0;
+        data.forEach(d => {
+          maxVal = Math.max(maxVal, parseFloat(d.AVG) || 0, parseFloat(d.OBP) || 0, parseFloat(d.OPS) || 0);
+        });
+        // 動態調整天花板高度，最少顯示到 1.000
+        maxVal = Math.ceil((maxVal + 0.1) * 10) / 10; 
+        if (maxVal < 1) maxVal = 1;
+
+        const width = 320, height = 160, paddingX = 35, paddingY = 20;
+        const chartWidth = width - paddingX * 2;
+        const chartHeight = height - paddingY * 2;
+
+        const groupWidth = chartWidth / metrics.length;
+        const barWidth = Math.min((groupWidth * 0.7) / Math.max(data.length, 1), 14); // 動態調整柱子寬度
+        const barSpacing = 2; // 柱子間的距離
+
+        return (
+          <div className="bg-white p-4 rounded-[1.25rem]">
+            {/* 標題與圖例 (顯示各球隊對應顏色) */}
+            <div className="mb-4">
+              <h3 className="font-semibold text-black text-[14px] flex items-center gap-2 mb-2.5">
+                <BarChart2 className="w-4 h-4 text-[#8E8E93]" /> 綜合數據比較
+              </h3>
+              <div className="flex flex-wrap gap-x-3 gap-y-1.5 text-[10px] font-medium">
+                {data.map((d, i) => {
+                  let label = d.name;
+                  const match = label.match(/^(.*?)(?:[(（].*?[)）]?)?$/);
+                  if (match && match[1]) label = match[1].trim();
+                  return (
+                    <div key={`legend-${i}`} className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-[3px]" style={{ backgroundColor: palette[i % palette.length] }}></span>
+                      <span className="text-[#8E8E93]">{label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="w-full overflow-visible">
+               <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto overflow-visible">
+                {/* 背景網格線與 Y 軸數值 (顯示 0, 0.5, 1.0 的基準線) */}
+                {[0, 0.5, 1].map(ratio => {
+                  const y = height - paddingY - (chartHeight * ratio);
+                  const val = (maxVal * ratio).toFixed(3).replace(/^0+/, '');
+                  return (
+                    <g key={`grid-${ratio}`}>
+                      <line x1={paddingX} y1={y} x2={width-paddingX} y2={y} stroke="#E5E5EA" strokeDasharray={ratio > 0 ? "4 4" : ""} />
+                      <text x={paddingX - 5} y={y + 3} fontSize="10" fill="#8E8E93" textAnchor="end">{ratio === 0 ? '.000' : val}</text>
+                    </g>
+                  );
+                })}
+                
+                {/* 繪製長條圖 (外層迴圈為指標，內層迴圈為球隊) */}
+                {metrics.map((m, i) => {
+                  const groupCenterX = paddingX + (i * groupWidth) + (groupWidth / 2);
+                  const totalBarsWidth = data.length * barWidth + (data.length - 1) * barSpacing;
+                  const startX = groupCenterX - (totalBarsWidth / 2);
+
+                  return (
+                    <g key={`group-${m.key}`}>
+                      {data.map((d, j) => {
+                        const val = parseFloat(d[m.key]) || 0;
+                        const barH = (val / maxVal) * chartHeight;
+                        const x = startX + j * (barWidth + barSpacing);
+                        const y = height - paddingY - barH;
+                        
+                        return (
+                          <rect key={`bar-${i}-${j}`} x={x} y={y} width={barWidth} height={barH} fill={palette[j % palette.length]} rx="2" />
+                        );
+                      })}
+                      {/* X 軸指標名稱 (AVG, OBP, OPS) */}
+                      <text x={groupCenterX} y={height - 2} fontSize="11" fill="#8E8E93" fontWeight="600" textAnchor="middle">{m.key}</text>
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+          </div>
+        );
+      };
 
       // SVG 折線圖元件
       const renderLineChart = (data, dataKey, title, color) => {
@@ -261,11 +355,9 @@
                   const val = parseFloat(d[dataKey]) || 0;
                   const x = paddingX + (i / (data.length - 1)) * (width - 2 * paddingX);
                   const y = height - paddingY - (val - minVal) / range * (height - 2 * paddingY);
-                  // 標籤顯示邏輯：如果是 YYYY-MM 取後兩碼，如果是長日期取後五碼，如果是年份直接顯示
                   let label = d.name;
                   if (d.name.length === 10) label = d.name.substring(5);
                   else if (d.name.length === 7) label = d.name.substring(5);
-
                   return (
                     <g key={i}>
                       <circle cx={x} cy={y} r="3.5" fill="white" stroke={color} strokeWidth="2" />
@@ -561,22 +653,38 @@
                         </div>
                       </div>
 
-                      {/* 渲染折線圖區塊: 年份趨勢, 月份趨勢, 及特定球隊趨勢 */}
-                      {((statsView === 'year' && !statDrillYearMonth) || 
-                        (statsView === 'month' && !statDrillOverallMonth) || 
-                        (statsView === 'team' && statDrillTeam && !statDrillMonth)) && (
-                        <div>
-                          {currentData.length < 2 ? (
-                            <p className="text-center text-[13px] text-[#8E8E93] py-4">* 累積兩筆以上的資料即可解鎖趨勢圖</p>
-                          ) : (
+                      {/* 渲染圖表區塊 */}
+                      {(() => {
+                        // 1. 如果在「依球隊」的第一層，或是「依月份」、「依年份」下鑽到看各球隊時，使用「分組長條圖」比較球隊
+                        if (
+                          (statsView === 'team' && !statDrillTeam) || 
+                          (statsView === 'month' && statDrillOverallMonth) ||
+                          (statsView === 'year' && statDrillYearMonth)
+                        ) {
+                          return renderGroupedBarChart(currentData);
+                        }
+                        
+                        // 2. 如果是看時間趨勢 (月份、年份或下鑽到某隊的月份)，則維持原本的三張「折線圖」
+                        if (
+                          (statsView === 'month' && !statDrillOverallMonth) || 
+                          (statsView === 'team' && statDrillTeam && !statDrillMonth) ||
+                          (statsView === 'year' && !statDrillYearMonth)
+                        ) {
+                          if (currentData.length < 2) {
+                            return <p className="text-center text-[13px] text-[#8E8E93] py-4">* 累積兩筆以上的資料即可解鎖趨勢圖</p>;
+                          }
+                          return (
                             <div className="space-y-4">
                               {renderLineChart(currentData, 'AVG', '打擊率 (AVG)', '#007AFF')}
                               {renderLineChart(currentData, 'OBP', '上壘率 (OBP)', '#34C759')}
                               {renderLineChart(currentData, 'OPS', '攻擊指數 (OPS)', '#AF52DE')}
                             </div>
-                          )}
-                        </div>
-                      )}
+                          );
+                        }
+
+                        // 單日成績不用圖表
+                        return null;
+                      })()}
                     </div>
                   );
                 })()}
