@@ -63,6 +63,9 @@
     const db = getFirestore(app);
     const TEAM_ID = "softball-team-shared-001";
 
+    // ⭐ 集中管理預設球隊 (更換球隊時只需修改這裡)
+    const PRESET_TEAMS = ['幸福家', '蔡淑惠'];
+
     const OUTCOMES = {
       '1B': { label: '一安', bgColor: 'bg-green-100', textColor: 'text-green-700', borderColor: 'border-green-300', activeBg: 'bg-green-500', activeText: 'text-white' },
       '2B': { label: '二安', bgColor: 'bg-green-100', textColor: 'text-green-700', borderColor: 'border-green-300', activeBg: 'bg-green-500', activeText: 'text-white' },
@@ -70,7 +73,7 @@
       'HR': { label: '全壘打', bgColor: 'bg-green-100', textColor: 'text-green-700', borderColor: 'border-green-300', activeBg: 'bg-green-600', activeText: 'text-white' },
       'GO': { label: '滾地出局', bgColor: 'bg-red-100', textColor: 'text-red-700', borderColor: 'border-red-300', activeBg: 'bg-red-500', activeText: 'text-white' },
       'FO': { label: '飛球出局', bgColor: 'bg-red-100', textColor: 'text-red-700', borderColor: 'border-red-300', activeBg: 'bg-red-500', activeText: 'text-white' },
-      'LO': { label: '平飛出局', bgColor: 'bg-red-100', textColor: 'text-red-700', borderColor: 'border-red-300', activeBg: 'bg-red-500', activeText: 'text-white' },
+      'DP': { label: '雙殺打', bgColor: 'bg-red-200', textColor: 'text-red-800', borderColor: 'border-red-400', activeBg: 'bg-red-700', activeText: 'text-white' },
       'K':  { label: '三振', bgColor: 'bg-red-100', textColor: 'text-red-700', borderColor: 'border-red-300', activeBg: 'bg-red-600', activeText: 'text-white' },
       'FC': { label: '野手選擇', bgColor: 'bg-orange-100', textColor: 'text-orange-700', borderColor: 'border-orange-300', activeBg: 'bg-orange-500', activeText: 'text-white' },
       'BB': { label: '四壞保送', bgColor: 'bg-blue-100', textColor: 'text-blue-700', borderColor: 'border-blue-300', activeBg: 'bg-blue-500', activeText: 'text-white' },
@@ -105,7 +108,8 @@
       }, [user]);
 
       const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
-      const [selectedTeam, setSelectedTeam] = useState('幸福家');
+      // 使用 PRESET_TEAMS 動態設定預設選中球隊
+      const [selectedTeam, setSelectedTeam] = useState(PRESET_TEAMS[0] || '自訂');
       const [customTeam, setCustomTeam] = useState('');
       const [selectedOutcome, setSelectedOutcome] = useState(null);
       const [rbi, setRbi] = useState(0);
@@ -113,21 +117,26 @@
       const [isEditing, setIsEditing] = useState(false);
       const [editingId, setEditingId] = useState(null);
 
+      // 動態找出過去曾經記錄過的「自訂球隊」
+      const recentCustomTeams = useMemo(() => {
+        const defaults = [...PRESET_TEAMS, '自訂', '未分類'];
+        const uniqueTeams = new Set();
+        records.forEach(r => {
+          if (r.team && !defaults.includes(r.team)) {
+            uniqueTeams.add(r.team);
+          }
+        });
+        return Array.from(uniqueTeams);
+      }, [records]);
+
       // 數據檢視與下鑽狀態
-      const [statsView, setStatsView] = useState('team'); // 'team', 'month', 'year'
-      
-      // 球隊視圖的下鑽狀態
+      const [statsView, setStatsView] = useState('team');
       const [statDrillTeam, setStatDrillTeam] = useState(null);
       const [statDrillMonth, setStatDrillMonth] = useState(null);
-      
-      // 月份視圖的下鑽狀態
       const [statDrillOverallMonth, setStatDrillOverallMonth] = useState(null);
-
-      // 年份視圖的下鑽狀態
       const [statDrillYear, setStatDrillYear] = useState(null);
       const [statDrillYearMonth, setStatDrillYearMonth] = useState(null);
 
-      // 切換視圖時重置所有下鑽狀態
       const handleViewChange = (view) => {
         setStatsView(view);
         setStatDrillTeam(null);
@@ -137,7 +146,6 @@
         setStatDrillYearMonth(null);
       };
 
-      // 處理球隊名稱換行且隱藏括號的 Helper Function
       const formatName = (name) => {
         if (!name) return name;
         const match = name.match(/^(.*?)[(（](.*?)[)）]?$/);
@@ -154,7 +162,6 @@
         return <span>{name}</span>;
       };
 
-      // 共用的計算數據函數
       const calculateStats = (recordsToProcess, keyExtractor) => {
         const grouped = {};
         recordsToProcess.forEach(r => {
@@ -171,7 +178,8 @@
           else if (r.outcome === '2B') { p['2B']++; p.H++; p.AB++; }
           else if (r.outcome === '3B') { p['3B']++; p.H++; p.AB++; }
           else if (r.outcome === 'HR') { p.HR++; p.H++; p.AB++; }
-          else if (['GO', 'FO', 'LO', 'K', 'E', 'FC'].includes(r.outcome)) { p.AB++; }
+          // 保留 LO 以防舊資料，加入 DP 到出局計算
+          else if (['GO', 'FO', 'LO', 'DP', 'K', 'E', 'FC'].includes(r.outcome)) { p.AB++; }
 
           if (r.outcome === 'K') p.K++;
           if (r.outcome === 'BB') p.BB++;
@@ -194,78 +202,36 @@
         });
       };
 
-      // --- 依球隊分析的各層級數據 ---
-      const teamStats = useMemo(() => 
-        calculateStats(records, r => r.team || '未分類').sort((a, b) => parseFloat(b.OPS || 0) - parseFloat(a.OPS || 0)), 
-      [records]);
+      const teamStats = useMemo(() => calculateStats(records, r => r.team || '未分類').sort((a, b) => parseFloat(b.OPS || 0) - parseFloat(a.OPS || 0)), [records]);
+      const teamMonthlyStats = useMemo(() => calculateStats(records.filter(r => r.team === statDrillTeam), r => r.date ? r.date.substring(0, 7) : null).sort((a, b) => a.name.localeCompare(b.name)), [records, statDrillTeam]);
+      const teamDailyStats = useMemo(() => calculateStats(records.filter(r => r.team === statDrillTeam && r.date && r.date.startsWith(statDrillMonth)), r => r.date).sort((a, b) => a.name.localeCompare(b.name)), [records, statDrillTeam, statDrillMonth]);
 
-      const teamMonthlyStats = useMemo(() => 
-        calculateStats(records.filter(r => r.team === statDrillTeam), r => r.date ? r.date.substring(0, 7) : null).sort((a, b) => a.name.localeCompare(b.name)), 
-      [records, statDrillTeam]);
+      const overallMonthlyStats = useMemo(() => calculateStats(records, r => r.date ? r.date.substring(0, 7) : null).sort((a, b) => a.name.localeCompare(b.name)), [records]);
+      const monthTeamStats = useMemo(() => calculateStats(records.filter(r => r.date && r.date.startsWith(statDrillOverallMonth)), r => r.team || '未分類').sort((a, b) => parseFloat(b.OPS || 0) - parseFloat(a.OPS || 0)), [records, statDrillOverallMonth]);
 
-      const teamDailyStats = useMemo(() => 
-        calculateStats(records.filter(r => r.team === statDrillTeam && r.date && r.date.startsWith(statDrillMonth)), r => r.date).sort((a, b) => a.name.localeCompare(b.name)), 
-      [records, statDrillTeam, statDrillMonth]);
+      const overallYearlyStats = useMemo(() => calculateStats(records, r => r.date ? r.date.substring(0, 4) : null).sort((a, b) => a.name.localeCompare(b.name)), [records]);
+      const yearMonthlyStats = useMemo(() => calculateStats(records.filter(r => r.date && r.date.startsWith(statDrillYear)), r => r.date ? r.date.substring(0, 7) : null).sort((a, b) => a.name.localeCompare(b.name)), [records, statDrillYear]);
+      const yearMonthTeamStats = useMemo(() => calculateStats(records.filter(r => r.date && r.date.startsWith(statDrillYearMonth)), r => r.team || '未分類').sort((a, b) => parseFloat(b.OPS || 0) - parseFloat(a.OPS || 0)), [records, statDrillYearMonth]);
 
-      // --- 依月份分析的各層級數據 ---
-      const overallMonthlyStats = useMemo(() => 
-        calculateStats(records, r => r.date ? r.date.substring(0, 7) : null).sort((a, b) => a.name.localeCompare(b.name)), 
-      [records]);
-
-      const monthTeamStats = useMemo(() => 
-        calculateStats(records.filter(r => r.date && r.date.startsWith(statDrillOverallMonth)), r => r.team || '未分類').sort((a, b) => parseFloat(b.OPS || 0) - parseFloat(a.OPS || 0)), 
-      [records, statDrillOverallMonth]);
-
-      // --- 依年份分析的各層級數據 ---
-      const overallYearlyStats = useMemo(() => 
-        calculateStats(records, r => r.date ? r.date.substring(0, 4) : null).sort((a, b) => a.name.localeCompare(b.name)), 
-      [records]);
-
-      const yearMonthlyStats = useMemo(() => 
-        calculateStats(records.filter(r => r.date && r.date.startsWith(statDrillYear)), r => r.date ? r.date.substring(0, 7) : null).sort((a, b) => a.name.localeCompare(b.name)), 
-      [records, statDrillYear]);
-
-      const yearMonthTeamStats = useMemo(() => 
-        calculateStats(records.filter(r => r.date && r.date.startsWith(statDrillYearMonth)), r => r.team || '未分類').sort((a, b) => parseFloat(b.OPS || 0) - parseFloat(a.OPS || 0)), 
-      [records, statDrillYearMonth]);
-
-      // SVG 分組長條圖元件 (用於球隊比較)
+      // 分組長條圖
       const renderGroupedBarChart = (data) => {
         if (data.length === 0) return null;
-
-        // X 軸的群組改為數據指標
-        const metrics = [
-          { key: 'AVG', label: 'AVG' },
-          { key: 'OBP', label: 'OBP' },
-          { key: 'OPS', label: 'OPS' }
-        ];
-
-        // 球隊的專屬配色 (iOS 風格色系)
+        const metrics = [{ key: 'AVG', label: 'AVG' }, { key: 'OBP', label: 'OBP' }, { key: 'OPS', label: 'OPS' }];
         const palette = ['#007AFF', '#34C759', '#FF9500', '#AF52DE', '#FF3B30', '#5AC8FA', '#5856D6', '#FF2D55'];
-
         let maxVal = 0;
-        data.forEach(d => {
-          maxVal = Math.max(maxVal, parseFloat(d.AVG) || 0, parseFloat(d.OBP) || 0, parseFloat(d.OPS) || 0);
-        });
-        // 動態調整天花板高度，最少顯示到 1.000
+        data.forEach(d => { maxVal = Math.max(maxVal, parseFloat(d.AVG) || 0, parseFloat(d.OBP) || 0, parseFloat(d.OPS) || 0); });
         maxVal = Math.ceil((maxVal + 0.1) * 10) / 10; 
         if (maxVal < 1) maxVal = 1;
-
         const width = 320, height = 160, paddingX = 35, paddingY = 20;
-        const chartWidth = width - paddingX * 2;
-        const chartHeight = height - paddingY * 2;
-
+        const chartWidth = width - paddingX * 2, chartHeight = height - paddingY * 2;
         const groupWidth = chartWidth / metrics.length;
-        const barWidth = Math.min((groupWidth * 0.7) / Math.max(data.length, 1), 14); // 動態調整柱子寬度
-        const barSpacing = 2; // 柱子間的距離
+        const barWidth = Math.min((groupWidth * 0.7) / Math.max(data.length, 1), 14);
+        const barSpacing = 2;
 
         return (
           <div className="bg-white p-4 rounded-[1.25rem]">
-            {/* 標題與圖例 (顯示各球隊對應顏色) */}
             <div className="mb-4">
-              <h3 className="font-semibold text-black text-[14px] flex items-center gap-2 mb-2.5">
-                <BarChart2 className="w-4 h-4 text-[#8E8E93]" /> 綜合數據比較
-              </h3>
+              <h3 className="font-semibold text-black text-[14px] flex items-center gap-2 mb-2.5"><BarChart2 className="w-4 h-4 text-[#8E8E93]" /> 綜合數據比較</h3>
               <div className="flex flex-wrap gap-x-3 gap-y-1.5 text-[10px] font-medium">
                 {data.map((d, i) => {
                   let label = d.name;
@@ -273,17 +239,14 @@
                   if (match && match[1]) label = match[1].trim();
                   return (
                     <div key={`legend-${i}`} className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-[3px]" style={{ backgroundColor: palette[i % palette.length] }}></span>
-                      <span className="text-[#8E8E93]">{label}</span>
+                      <span className="w-2.5 h-2.5 rounded-[3px]" style={{ backgroundColor: palette[i % palette.length] }}></span><span className="text-[#8E8E93]">{label}</span>
                     </div>
                   );
                 })}
               </div>
             </div>
-
             <div className="w-full overflow-visible">
                <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto overflow-visible">
-                {/* 背景網格線與 Y 軸數值 (顯示 0, 0.5, 1.0 的基準線) */}
                 {[0, 0.5, 1].map(ratio => {
                   const y = height - paddingY - (chartHeight * ratio);
                   const val = (maxVal * ratio).toFixed(3).replace(/^0+/, '');
@@ -294,13 +257,10 @@
                     </g>
                   );
                 })}
-                
-                {/* 繪製長條圖 (外層迴圈為指標，內層迴圈為球隊) */}
                 {metrics.map((m, i) => {
                   const groupCenterX = paddingX + (i * groupWidth) + (groupWidth / 2);
                   const totalBarsWidth = data.length * barWidth + (data.length - 1) * barSpacing;
                   const startX = groupCenterX - (totalBarsWidth / 2);
-
                   return (
                     <g key={`group-${m.key}`}>
                       {data.map((d, j) => {
@@ -308,12 +268,8 @@
                         const barH = (val / maxVal) * chartHeight;
                         const x = startX + j * (barWidth + barSpacing);
                         const y = height - paddingY - barH;
-                        
-                        return (
-                          <rect key={`bar-${i}-${j}`} x={x} y={y} width={barWidth} height={barH} fill={palette[j % palette.length]} rx="2" />
-                        );
+                        return <rect key={`bar-${i}-${j}`} x={x} y={y} width={barWidth} height={barH} fill={palette[j % palette.length]} rx="2" />;
                       })}
-                      {/* X 軸指標名稱 (AVG, OBP, OPS) */}
                       <text x={groupCenterX} y={height - 2} fontSize="11" fill="#8E8E93" fontWeight="600" textAnchor="middle">{m.key}</text>
                     </g>
                   );
@@ -324,7 +280,6 @@
         );
       };
 
-      // SVG 折線圖元件
       const renderLineChart = (data, dataKey, title, color) => {
         if (data.length < 2) return null;
         const values = data.map(d => parseFloat(d[dataKey]) || 0);
@@ -332,7 +287,6 @@
         const minVal = Math.max(0, Math.min(...values) - 0.05);
         const range = maxVal - minVal || 1;
         const width = 300, height = 100, paddingX = 30, paddingY = 20;
-
         const points = data.map((d, i) => {
           const x = paddingX + (i / (data.length - 1)) * (width - 2 * paddingX);
           const y = height - paddingY - ((parseFloat(d[dataKey]) || 0) - minVal) / range * (height - 2 * paddingY);
@@ -355,9 +309,7 @@
                   const val = parseFloat(d[dataKey]) || 0;
                   const x = paddingX + (i / (data.length - 1)) * (width - 2 * paddingX);
                   const y = height - paddingY - (val - minVal) / range * (height - 2 * paddingY);
-                  let label = d.name;
-                  if (d.name.length === 10) label = d.name.substring(5);
-                  else if (d.name.length === 7) label = d.name.substring(5);
+                  const label = d.name.length > 7 ? d.name.substring(5) : d.name.substring(5);
                   return (
                     <g key={i}>
                       <circle cx={x} cy={y} r="3.5" fill="white" stroke={color} strokeWidth="2" />
@@ -374,9 +326,11 @@
 
       const handleEditClick = (record) => {
         setIsEditing(true); setEditingId(record.id); setSelectedDate(record.date);
-        if (['幸福家', '蔡淑惠'].includes(record.team)) { setSelectedTeam(record.team); setCustomTeam(''); } 
+        // 使用 PRESET_TEAMS 判斷是否為預設球隊
+        if (PRESET_TEAMS.includes(record.team)) { setSelectedTeam(record.team); setCustomTeam(''); } 
         else { setSelectedTeam('自訂'); setCustomTeam(record.team); }
-        setSelectedOutcome(record.outcome); setRbi(record.rbi || 0); setActiveTab('record');
+        // 為了相容舊版，如果是 LO，編輯時改顯示為 FO
+        setSelectedOutcome(record.outcome === 'LO' ? 'FO' : record.outcome); setRbi(record.rbi || 0); setActiveTab('record');
       };
 
       const handleCancelEdit = () => {
@@ -402,6 +356,10 @@
 
       const handleDeleteRecord = async (id) => {
         if (!user) return;
+        // ⭐ 增加刪除防呆確認
+        const confirmDelete = window.confirm("確定要刪除這筆記錄嗎？這項操作無法復原。");
+        if (!confirmDelete) return;
+
         try { await deleteDoc(doc(db, 'artifacts', TEAM_ID, 'public', 'data', 'records', id)); } catch (e) { console.error(e); }
       };
 
@@ -424,12 +382,24 @@
                   <div className="p-4">
                     <span className="text-[17px] text-black block mb-3">球隊</span>
                     <div className="flex bg-[#E5E5EA] p-1 rounded-[8px] mb-2">
-                      {['幸福家', '蔡淑惠', '自訂'].map(team => (
+                      {/* 動態渲染預設球隊按鈕 */}
+                      {[...PRESET_TEAMS, '自訂'].map(team => (
                         <button key={team} onClick={() => setSelectedTeam(team)} className={`flex-1 py-1.5 rounded-[6px] text-[13px] font-medium transition-all ${selectedTeam === team ? 'bg-white text-black shadow-sm' : 'text-black/60'}`}>{team}</button>
                       ))}
                     </div>
                     {selectedTeam === '自訂' && (
-                      <input type="text" value={customTeam} onChange={(e) => setCustomTeam(e.target.value)} placeholder="輸入自訂球隊" className="w-full mt-1 p-2 border-b border-[#E5E5EA] outline-none text-[17px] bg-transparent"/>
+                      <div className="mt-1">
+                        <input type="text" value={customTeam} onChange={(e) => setCustomTeam(e.target.value)} placeholder="輸入自訂球隊" className="w-full p-2 border-b border-[#E5E5EA] outline-none text-[17px] bg-transparent"/>
+                        {recentCustomTeams.length > 0 && (
+                          <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
+                            {recentCustomTeams.map(team => (
+                              <button key={team} onClick={() => setCustomTeam(team)} className="px-3 py-1.5 bg-[#F2F2F7] text-[#8E8E93] text-[13px] font-medium rounded-[8px] whitespace-nowrap active:bg-[#E5E5EA] transition-colors border border-[#E5E5EA]">
+                                {team}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -438,7 +408,7 @@
                   <h2 className="text-[13px] text-[#8E8E93] uppercase pl-4 mb-2">打擊結果</h2>
                   <div className="bg-white p-4 rounded-[1.25rem]">
                     <div className="grid grid-cols-4 gap-3">
-                      {Object.entries(OUTCOMES).map(([key, data]) => (
+                      {Object.entries(OUTCOMES).filter(([key]) => key !== 'LO').map(([key, data]) => (
                         <button key={key} onClick={() => setSelectedOutcome(key)} className={`py-3 px-1 rounded-[12px] border-2 transition-all duration-200 ${selectedOutcome === key ? `${data.activeBg} ${data.activeText} border-transparent shadow-md transform scale-105` : `${data.bgColor} ${data.textColor} ${data.borderColor} active:scale-95`}`}>
                           <div className="text-[17px] font-semibold mb-0.5">{key}</div>
                           <div className="text-[10px] opacity-90">{data.label}</div>
@@ -477,12 +447,19 @@
                 ) : (
                   <div className="bg-white rounded-[1.25rem] overflow-hidden">
                     {records.map((record, index) => {
-                      const outcomeData = OUTCOMES[record.outcome];
+                      let outcomeData = OUTCOMES[record.outcome];
+                      if (!outcomeData) {
+                        if (record.outcome === 'LO') outcomeData = { label: '飛球出局', bgColor: 'bg-red-100', activeBg: 'bg-red-500' };
+                        else outcomeData = { label: '未知', bgColor: 'bg-gray-100', activeBg: 'bg-gray-500' };
+                      }
+                      
                       const timeStr = new Date(record.timestamp).toLocaleTimeString('zh-TW', { hour: '2-digit', minute:'2-digit' });
                       return (
                         <div key={record.id} className={`p-4 flex items-center justify-between ${index !== records.length - 1 ? 'border-b border-[#E5E5EA]' : ''}`}>
                           <div className="flex items-center gap-4">
-                            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${outcomeData.activeBg} text-white font-semibold text-[17px]`}>{record.outcome}</div>
+                            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${outcomeData.activeBg} text-white font-semibold text-[17px]`}>
+                              {record.outcome === 'LO' ? 'FO' : record.outcome}
+                            </div>
                             <div>
                               <div className="font-semibold text-[16px] text-black leading-tight mb-1">{formatName(record.team)}</div>
                               <div className="text-[13px] text-[#8E8E93] flex items-center gap-1.5 mt-1">
@@ -508,14 +485,12 @@
               <div className="animate-in fade-in duration-300">
                 <h2 className="text-[28px] font-bold text-black mb-4 pl-2">數據統計</h2>
 
-                {/* 切換三個模式：球隊、月份、年份 */}
                 <div className="flex bg-[#E5E5EA] p-1 rounded-[8px] mb-4">
                   <button onClick={() => handleViewChange('team')} className={`flex-1 py-1.5 rounded-[6px] text-[13px] font-medium transition-all ${statsView === 'team' ? 'bg-white text-black shadow-sm' : 'text-black/60'}`}>依球隊</button>
                   <button onClick={() => handleViewChange('month')} className={`flex-1 py-1.5 rounded-[6px] text-[13px] font-medium transition-all ${statsView === 'month' ? 'bg-white text-black shadow-sm' : 'text-black/60'}`}>依月份</button>
                   <button onClick={() => handleViewChange('year')} className={`flex-1 py-1.5 rounded-[6px] text-[13px] font-medium transition-all ${statsView === 'year' ? 'bg-white text-black shadow-sm' : 'text-black/60'}`}>依年份</button>
                 </div>
 
-                {/* 麵包屑導航列 - 依球隊 */}
                 {statsView === 'team' && (
                   <div className="flex items-center gap-2 mb-4 px-2 overflow-x-auto whitespace-nowrap">
                     <button onClick={() => { setStatDrillTeam(null); setStatDrillMonth(null); }} className={`text-[15px] transition-opacity ${!statDrillTeam ? 'font-bold text-black' : 'text-[#007AFF] active:opacity-60'}`}>
@@ -538,7 +513,6 @@
                   </div>
                 )}
 
-                {/* 麵包屑導航列 - 依月份 */}
                 {statsView === 'month' && (
                   <div className="flex items-center gap-2 mb-4 px-2 overflow-x-auto whitespace-nowrap">
                     <button onClick={() => setStatDrillOverallMonth(null)} className={`text-[15px] transition-opacity ${!statDrillOverallMonth ? 'font-bold text-black' : 'text-[#007AFF] active:opacity-60'}`}>
@@ -553,7 +527,6 @@
                   </div>
                 )}
 
-                {/* 麵包屑導航列 - 依年份 */}
                 {statsView === 'year' && (
                   <div className="flex items-center gap-2 mb-4 px-2 overflow-x-auto whitespace-nowrap">
                     <button onClick={() => { setStatDrillYear(null); setStatDrillYearMonth(null); }} className={`text-[15px] transition-opacity ${!statDrillYear ? 'font-bold text-black' : 'text-[#007AFF] active:opacity-60'}`}>
@@ -632,7 +605,6 @@
                                 <tr key={s.name} 
                                     onClick={() => { if (onClickRow) onClickRow(s); }}
                                     className={`bg-white transition-colors ${canDrillDown ? 'cursor-pointer active:bg-[#E5E5EA]' : ''}`}>
-                                  {/* 使用 formatName 自動判斷括號並換行且隱藏括號 */}
                                   <td className="px-3 py-3 sticky left-0 bg-inherit font-semibold text-black z-10 whitespace-nowrap border-r border-[#E5E5EA]">
                                     <div className="flex items-center justify-between gap-2">
                                       {formatName(s.name)}
@@ -655,7 +627,6 @@
 
                       {/* 渲染圖表區塊 */}
                       {(() => {
-                        // 1. 如果在「依球隊」的第一層，或是「依月份」、「依年份」下鑽到看各球隊時，使用「分組長條圖」比較球隊
                         if (
                           (statsView === 'team' && !statDrillTeam) || 
                           (statsView === 'month' && statDrillOverallMonth) ||
@@ -664,7 +635,6 @@
                           return renderGroupedBarChart(currentData);
                         }
                         
-                        // 2. 如果是看時間趨勢 (月份、年份或下鑽到某隊的月份)，則維持原本的三張「折線圖」
                         if (
                           (statsView === 'month' && !statDrillOverallMonth) || 
                           (statsView === 'team' && statDrillTeam && !statDrillMonth) ||
@@ -682,7 +652,6 @@
                           );
                         }
 
-                        // 單日成績不用圖表
                         return null;
                       })()}
                     </div>
